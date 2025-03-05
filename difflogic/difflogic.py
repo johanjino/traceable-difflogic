@@ -36,37 +36,31 @@ class LogicLayer(torch.nn.Module):
         self.device = device
         self.grad_factor = grad_factor
 
-        """
-        The CUDA implementation is the fast implementation. As the name implies, the cuda implementation is only 
-        available for device='cuda'. The `python` implementation exists for 2 reasons:
-        1. To provide an easy-to-understand implementation of differentiable logic gate networks 
-        2. To provide a CPU implementation of differentiable logic gate networks 
-        """
         self.implementation = implementation
         # if self.implementation is None and device == 'cuda':
         #     self.implementation = 'cuda'
         # elif self.implementation is None and device == 'cpu':
         #     self.implementation = 'python'
-        assert self.implementation in ['python'], (self.implementation, 'This version of difflogic does not support native CUDA and only the Python + PyTorch variant, use `python`. Still supports GPUs via high-level PyTorch.')
+        # assert self.implementation in ['python'], (self.implementation, 'This version of difflogic does not support native CUDA and only the Python + PyTorch variant, use `python`. Still supports GPUs via high-level PyTorch.')
 
         self.connections = connections
-        assert self.connections in ['random', 'unique'], self.connections
-        self.indices = self.get_connections(self.connections, device)
+        # assert self.connections in ['random', 'unique'], self.connections
+        self.indices = torch.nn.parameter.Parameter(torch.stack(self.get_connections(self.connections, device)), requires_grad=False)
 
-        if self.implementation == 'cuda':
-            """
-            Defining additional indices for improving the efficiency of the backward of the CUDA implementation.
-            """
-            given_x_indices_of_y = [[] for _ in range(in_dim)]
-            indices_0_np = self.indices[0].cpu().numpy()
-            indices_1_np = self.indices[1].cpu().numpy()
-            for y in range(out_dim):
-                given_x_indices_of_y[indices_0_np[y]].append(y)
-                given_x_indices_of_y[indices_1_np[y]].append(y)
-            self.given_x_indices_of_y_start = torch.tensor(
-                np.array([0] + [len(g) for g in given_x_indices_of_y]).cumsum(), device=device, dtype=torch.int64)
-            self.given_x_indices_of_y = torch.tensor(
-                [item for sublist in given_x_indices_of_y for item in sublist], dtype=torch.int64, device=device)
+#         if self.implementation == 'cuda':
+#             """
+#             Defining additional indices for improving the efficiency of the backward of the CUDA implementation.
+#             """
+#             given_x_indices_of_y = [[] for _ in range(in_dim)]
+#             indices_0_np = self.indices[0].cpu().numpy()
+#             indices_1_np = self.indices[1].cpu().numpy()
+#             for y in range(out_dim):
+#                 given_x_indices_of_y[indices_0_np[y]].append(y)
+#                 given_x_indices_of_y[indices_1_np[y]].append(y)
+#             self.given_x_indices_of_y_start = torch.tensor(
+#                 np.array([0] + [len(g) for g in given_x_indices_of_y]).cumsum(), device=device, dtype=torch.int64)
+#             self.given_x_indices_of_y = torch.tensor(
+#                 [item for sublist in given_x_indices_of_y for item in sublist], dtype=torch.int64, device=device)
 
         self.num_neurons = out_dim
         self.num_weights = out_dim
@@ -79,8 +73,8 @@ class LogicLayer(torch.nn.Module):
         #                                   ''.format(self.device)
 
         # else:
-        if self.grad_factor != 1.:
-            x = GradFactor.apply(x, self.grad_factor)
+#         if self.grad_factor != 1.:
+#             x = GradFactor.apply(x, self.grad_factor)
 
         # if self.implementation == 'cuda':
         #     if isinstance(x, PackBitsTensor):
@@ -93,19 +87,16 @@ class LogicLayer(torch.nn.Module):
             raise ValueError(self.implementation)
 
     def forward_python(self, x):
-        assert x.shape[-1] == self.in_dim, (x[0].shape[-1], self.in_dim)
+#         assert x.shape[-1] == self.in_dim, (x[0].shape[-1], self.in_dim)
 
-        if self.indices[0].dtype != torch.int64 or self.indices[1].dtype != torch.int64:
-            print(self.indices[0].dtype, self.indices[1].dtype)
-            self.indices = self.indices[0].long(), self.indices[1].long()
-            print(self.indices[0].dtype, self.indices[1].dtype)
+#         if self.indices[0].dtype != torch.int64 or self.indices[1].dtype != torch.int64:
+#             print(self.indices[0].dtype, self.indices[1].dtype)
+        indices = self.indices[0].long(), self.indices[1].long()
+#             print(self.indices[0].dtype, self.indices[1].dtype)
 
-        a, b = x[..., self.indices[0]], x[..., self.indices[1]]
-        if self.training:
-            x = bin_op_s(a, b, torch.nn.functional.softmax(self.weights, dim=-1))
-        else:
-            weights = torch.nn.functional.one_hot(self.weights.argmax(-1), 16).to(torch.float32)
-            x = bin_op_s(a, b, weights)
+        a, b = x[..., indices[0]], x[..., indices[1]]
+        weights = torch.nn.functional.softmax(self.weights, dim=-1) if self.training else torch.nn.functional.one_hot(self.weights.argmax(-1), 16).to(torch.float32)
+        x = bin_op_s(a, b, weights)
         return x
 
     # def forward_cuda(self, x):
@@ -193,8 +184,13 @@ class GroupSum(torch.nn.Module):
 #         if isinstance(x, PackBitsTensor):
 #             return x.group_sum(self.k)
 
-        assert x.shape[-1] % self.k == 0, (x.shape, self.k)
-        return x.reshape(*x.shape[:-1], self.k, x.shape[-1] // self.k).sum(-1) / self.tau
+        #assert x.shape[-1] % self.k == 0, (x.shape, self.k)
+        #return x.reshape(*x.shape[:-1], self.k, x.shape[-1] // self.k).sum(-1) / self.tau
+        shape = x.shape  # Get the shape of x
+        new_shape = (shape[0], self.k, shape[-1] // self.k)  # Define new shape explicitly
+        x = x.reshape(new_shape)  # Reshape using explicit shape values
+        x = x.sum(dim=-1)  # Sum over the last dimension
+        return x / self.tau
 
     def extra_repr(self):
         return 'k={}, tau={}'.format(self.k, self.tau)
