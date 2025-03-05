@@ -23,44 +23,64 @@ BITS_TO_NP_DTYPE = {8: np.int8, 16: np.int16, 32: np.int32, 64: np.int64}
 # | 14 | not(A and B)         | 1     | 1     | 1     | 0     |
 # | 15 | 1                    | 1     | 1     | 1     | 1     |
 
-def bin_op(a, b, i):
-    assert a[0].shape == b[0].shape, (a[0].shape, b[0].shape)
-    if a.shape[0] > 1:
-        assert a[1].shape == b[1].shape, (a[1].shape, b[1].shape)
+# def bin_op(a, b, i):
+#     assert a[0].shape == b[0].shape, (a[0].shape, b[0].shape)
+#     if a.shape[0] > 1:
+#         assert a[1].shape == b[1].shape, (a[1].shape, b[1].shape)
 
-    if i == 0:
-        return torch.zeros_like(a)
-    elif i == 1:
-        return a * b
-    elif i == 2:
-        return a - a * b
-    elif i == 3:
-        return a
-    elif i == 4:
-        return b - a * b
-    elif i == 5:
-        return b
-    elif i == 6:
-        return a + b - 2 * a * b
-    elif i == 7:
-        return a + b - a * b
-    elif i == 8:
-        return 1 - (a + b - a * b)
-    elif i == 9:
-        return 1 - (a + b - 2 * a * b)
-    elif i == 10:
-        return 1 - b
-    elif i == 11:
-        return 1 - b + a * b
-    elif i == 12:
-        return 1 - a
-    elif i == 13:
-        return 1 - a + a * b
-    elif i == 14:
-        return 1 - a * b
-    elif i == 15:
-        return torch.ones_like(a)
+#     if i == 0:
+#         return torch.zeros_like(a)
+#     elif i == 1:
+#         return a * b
+#     elif i == 2:
+#         return a - a * b
+#     elif i == 3:
+#         return a
+#     elif i == 4:
+#         return b - a * b
+#     elif i == 5:
+#         return b
+#     elif i == 6:
+#         return a + b - 2 * a * b
+#     elif i == 7:
+#         return a + b - a * b
+#     elif i == 8:
+#         return 1 - (a + b - a * b)
+#     elif i == 9:
+#         return 1 - (a + b - 2 * a * b)
+#     elif i == 10:
+#         return 1 - b
+#     elif i == 11:
+#         return 1 - b + a * b
+#     elif i == 12:
+#         return 1 - a
+#     elif i == 13:
+#         return 1 - a + a * b
+#     elif i == 14:
+#         return 1 - a * b
+#     elif i == 15:
+#         return torch.ones_like(a)
 
+def bin_op(a, b, i):    
+    # FX graph traceable bin_op (significantly slower during inference, but doesnt affect graph)
+    return (
+        (i == 0) * torch.zeros_like(a) +
+        (i == 1) * (a * b) +
+        (i == 2) * (a - a * b) +
+        (i == 3) * a +
+        (i == 4) * (b - a * b) +
+        (i == 5) * b +
+        (i == 6) * (a + b - 2 * a * b) +
+        (i == 7) * (a + b - a * b) +
+        (i == 8) * (1 - (a + b - a * b)) +
+        (i == 9) * (1 - (a + b - 2 * a * b)) +
+        (i == 10) * (1 - b) +
+        (i == 11) * (1 - b + a * b) +
+        (i == 12) * (1 - a) +
+        (i == 13) * (1 - a + a * b) +
+        (i == 14) * (1 - a * b) +
+        (i == 15) * torch.ones_like(a)
+    )
 
 def bin_op_s(a, b, i_s):
     r = torch.zeros_like(a)
