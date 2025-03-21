@@ -47,7 +47,7 @@ class LogicLayer(torch.nn.Module):
             self.implementation = 'cuda'
         elif self.implementation is None and device == 'cpu':
             self.implementation = 'python'
-        assert self.implementation in ['cuda', 'python'], self.implementation
+        assert self.implementation in ['cuda', 'python', 'python_inference'], self.implementation
 
         self.connections = connections
         assert self.connections in ['random', 'unique'], self.connections
@@ -95,9 +95,9 @@ class LogicLayer(torch.nn.Module):
         assert x.shape[-1] == self.in_dim, (x[0].shape[-1], self.in_dim)
 
         if self.indices[0].dtype == torch.int64 or self.indices[1].dtype == torch.int64:
-            print(self.indices[0].dtype, self.indices[1].dtype)
+            # print(self.indices[0].dtype, self.indices[1].dtype)
             self.indices = self.indices[0].long(), self.indices[1].long()
-            print(self.indices[0].dtype, self.indices[1].dtype)
+            # print(self.indices[0].dtype, self.indices[1].dtype)
 
         a, b = x[..., self.indices[0]], x[..., self.indices[1]]
         if self.training:
@@ -168,9 +168,64 @@ class LogicLayer(torch.nn.Module):
         else:
             raise ValueError(connections)
 
-
 ########################################################################################################################
 
+class MyLogicLayer(LogicLayer):
+    def __init__(
+            self,
+            in_dim: int,
+            out_dim: int,
+            device: str = 'cuda',
+            grad_factor: float = 1.,
+            implementation: str = 'python',
+            connections: str = 'unique',
+    ):
+        super().__init__(in_dim, out_dim, device, grad_factor, implementation, connections)
+        self.register_buffer('indices_stored', torch.stack(self.indices)) # store the indices separately
+        
+    def forward(self, x):
+        if isinstance(x, PackBitsTensor):
+            assert not self.training, 'PackBitsTensor is not supported for the differentiable training mode.'
+            assert self.device == 'cuda', 'PackBitsTensor is only supported for CUDA, not for {}. ' \
+                                          'If you want fast inference on CPU, please use CompiledDiffLogicModel.' \
+                                          ''.format(self.device)
+
+        else:
+            if self.grad_factor != 1.:
+                x = GradFactor.apply(x, self.grad_factor)
+
+            if self.implementation == 'cuda':
+                if isinstance(x, PackBitsTensor):
+                    return self.forward_cuda_eval(x)
+                return self.forward_cuda(x)
+            elif self.implementation == 'python':
+                return self.forward_python(x)
+            elif self.implementation == 'python_inference':
+                self.use_stored_indices()
+                return self.forward_python(x)
+                # return self.forward_python_inference(x)
+            else:
+                raise ValueError(self.implementation)
+
+    def forward_python_inference(self, x):
+        assert not self.training, 'This is for python inference only using indices_stored.'
+        assert x.shape[-1] == self.in_dim, (x[0].shape[-1], self.in_dim)
+
+        if self.indices_stored[0].dtype != torch.int64 or self.indices[1].dtype != torch.int64:
+            print(self.indices_stored[0].dtype, self.indices_stored[1].dtype)
+            indices_stored = self.indices_stored[0].long(), self.indices_stored[1].long()
+            print(self.indices_stored[0].dtype, self.indices_stored[1].dtype)
+        else:
+            indices_stored = self.indices_stored
+        a, b = x[..., indices_stored[0]], x[..., indices_stored[1]]
+        weights = torch.nn.functional.softmax(self.weights, dim=-1) if self.training else torch.nn.functional.one_hot(self.weights.argmax(-1), 16).to(torch.float32)
+        x = bin_op_s(a, b, weights)
+        return x
+
+    def use_stored_indices(self):
+        self.indices = torch.unbind(self.indices_stored)
+
+########################################################################################################################
 
 class GroupSum(torch.nn.Module):
     """

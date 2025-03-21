@@ -12,7 +12,7 @@ from results_json import ResultsJSON
 
 import mnist_dataset
 import uci_datasets
-from difflogic import LogicLayer, GroupSum, PackBitsTensor, CompiledLogicNet
+from difflogic import MyLogicLayer, GroupSum, PackBitsTensor, CompiledLogicNet
 
 torch.set_num_threads(1)
 
@@ -117,7 +117,7 @@ def num_classes_of_dataset(dataset):
 
 
 def get_model(args):
-    llkw = dict(grad_factor=args.grad_factor, connections=args.connections)
+    llkw = dict(grad_factor=args.grad_factor, connections=args.connections, implementation=args.implementation)
 
     in_dim = input_dim_of_dataset(args.dataset)
     class_count = num_classes_of_dataset(args.dataset)
@@ -132,9 +132,9 @@ def get_model(args):
 
     if arch == 'randomly_connected':
         logic_layers.append(torch.nn.Flatten())
-        logic_layers.append(LogicLayer(in_dim=in_dim, out_dim=k, **llkw))
+        logic_layers.append(MyLogicLayer(in_dim=in_dim, out_dim=k, **llkw))
         for _ in range(l - 1):
-            logic_layers.append(LogicLayer(in_dim=k, out_dim=k, **llkw))
+            logic_layers.append(MyLogicLayer(in_dim=k, out_dim=k, **llkw))
 
         model = torch.nn.Sequential(
             *logic_layers,
@@ -142,7 +142,20 @@ def get_model(args):
         )
 
     ####################################################################################################################
+    elif arch == 'randomly_connected_list':
+        K = args.num_neurons_list
+        assert len(K) == l, f'list length {len(K)} should match num_layer {l}'
+        logic_layers.append(torch.nn.Flatten())
+        logic_layers.append(MyLogicLayer(in_dim=in_dim, out_dim=K[0], **llkw))
+        for i in range(1, l):
+            logic_layers.append(MyLogicLayer(in_dim=K[i-1], out_dim=K[i], **llkw))
 
+        model = torch.nn.Sequential(
+            *logic_layers,
+            GroupSum(class_count, args.tau)
+        )
+
+        
     else:
         raise NotImplementedError(arch)
 
@@ -251,6 +264,10 @@ if __name__ == '__main__':
     parser.add_argument('--num_layers', '-l', type=int)
 
     parser.add_argument('--grad-factor', type=float, default=1.)
+    
+    # additional arguments for architecture search
+    parser.add_argument('--num_neurons_list', '-K', type=int, nargs="*")
+    parser.add_argument('--name', '-n', type=str, default="")
 
     args = parser.parse_args()
 
@@ -275,6 +292,8 @@ if __name__ == '__main__':
     model, loss_fn, optim = get_model(args)
 
     ####################################################################################################################
+
+    SAVE_NAME = f"{args.dataset}_k{args.num_neurons}_l{args.num_layers}_model" if not args.name else args.name
 
     best_acc = 0
 
@@ -320,8 +339,10 @@ if __name__ == '__main__':
             else:
                 print(r)
 
-            if valid_accuracy_eval_mode > best_acc:
-                best_acc = valid_accuracy_eval_mode
+            # !!! make sure valid data is the same
+            if valid_accuracy_eval_mode > best_acc or (valid_accuracy_eval_mode==-1 and test_accuracy_eval_mode > best_acc):
+                best_acc = valid_accuracy_eval_mode if valid_accuracy_eval_mode!=-1 else test_accuracy_eval_mode
+                torch.save(model.state_dict(), f"{SAVE_NAME}_best.pth")
                 if args.experiment_id is not None:
                     results.store_final_results(r)
                 else:
@@ -329,6 +350,10 @@ if __name__ == '__main__':
 
             if args.experiment_id is not None:
                 results.save()
+
+            torch.save(model.state_dict(), f"{SAVE_NAME}_ckpt.pth")
+            
+    torch.save(model.state_dict(), f"{SAVE_NAME}_ckpt.pth")
 
     ####################################################################################################################
 
