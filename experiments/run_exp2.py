@@ -19,12 +19,24 @@ if __name__ == "__main__":
         # [12442, 10368, 8640, 7200, 6000], # 44649, ratio=1.2
     ]
     
+    ''' from ConvDLG paper: 
+    A good rule of thumb during scaling is that the optimal temperature is 
+    proportional to the square-root of the number of output gates
+    k_out | tau
+    8000  | 10  => linear scaler: k = 10 / sqrt(8000/10) = 0.3536
+    4800  | 7.7 => 0.3536 * sqrt(4800/10)
+    2300  | 5.4
+    750   | 3
+    '''
+    LINEAR_TAUS = True
+    GROUP_SUM_TAUS = [3, 5.4, 7.7]
+    
     for i, num_neorons_list in enumerate(NUM_NEURONS_LISTS):
         # Experiment parameters
         BATCH_SIZE = 100
-        TAU = 10
+        TAU = 10 if not LINEAR_TAUS else GROUP_SUM_TAUS[i]
         DATASET = "mnist20x20"
-        NUM_ITERATIONS = 200000
+        NUM_ITERATIONS = 100000
         EVAL_FREQ = 5000
         NUM_LAYERS = 6
         ARCHITECTURE = "randomly_connected_list"
@@ -32,9 +44,10 @@ if __name__ == "__main__":
 
         # Define expected filenames based on your naming convention
         model_file = f"{DATASET}_arch{i}_l{NUM_LAYERS}"
+        model_file += f"_t{TAU}" if LINEAR_TAUS else ""
         
         # Define results directory
-        RESULTS_DIR = "./results/2"
+        RESULTS_DIR = "./results"
         if not os.path.exists(RESULTS_DIR):
             os.makedirs(RESULTS_DIR)
         
@@ -59,11 +72,9 @@ if __name__ == "__main__":
             "--experiment_id", str(EXPERIMENT_ID),
             "--name", model_file,
         ]
-        # print(" ".join(map(lambda x:str(x), num_neorons_list)))
-        # exit()
         
         # Run the experiment and log the output to a file
-        log_file_path = os.path.join(RESULTS_DIR, "experiment2.log")
+        log_file_path = os.path.join(RESULTS_DIR, f"{model_file}.log")
         with open(log_file_path, "w") as logfile:
             process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             # Read and log the output line-by-line.

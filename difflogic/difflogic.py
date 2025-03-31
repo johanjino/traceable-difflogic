@@ -199,6 +199,7 @@ class MyLogicLayer(LogicLayer):
                     return self.forward_cuda_eval(x)
                 return self.forward_cuda(x)
             elif self.implementation == 'python':
+                self.use_stored_indices()
                 return self.forward_python(x)
             elif self.implementation == 'python_inference':
                 self.use_stored_indices()
